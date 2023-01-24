@@ -6,8 +6,15 @@ The Picocomputer explores retro computing and game development by removing the b
 Access to the reference design and source code is by invitation or by sponsoring 
 [Rumbledethumps](https://github.com/sponsors/rumbledethumps).
 
+ * Hardware is tested. Schematic is unlikely to change much.
+ * Graphics Mode 0, aka Color ANSI Terminal, is working.
+ * USB keyboard works.
+ * USB storage is mostly working. This is in-progress.
+ * Addressable-memory graphics modes are not yet implemented.
+ * Sound is not yet implemented.
+
 I'm building a YouTube channel to fund projects like this.
-I'll make the reference design public with an open source license
+I'll make everything public with an open source license
 once that is monitized, I've bought all the video production equipment I want,
 and paid for the equipment I've already bought.
 Projections put that well into 2024.
