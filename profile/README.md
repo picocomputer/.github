@@ -4,7 +4,7 @@ As seen on YouTube: https://www.youtube.com/@rumbledethumps
 Access to the source code repository is by invitation or by sponsoring
 [Rumbledethumps](https://github.com/sponsors/rumbledethumps).
 
-Here is the [schematic](https://github.com/picocomputer/rp6502/blob/main/sch/schematic.pdf).
+Here is the [schematic](https://github.com/picocomputer/.github/blob/main/schematic.pdf).
 
 The Picocomputer explores retro computing and game development by removing the barrier between genuine 8-bit hardware and modern devices. It can be built entirely with through-hole components, compactly using surface mount devices, or even on a breadboard. No programming devices need to be purchased and the only component used that wasn't available in the 1980s is the $4/€4 Raspberry Pi Pico.
 
