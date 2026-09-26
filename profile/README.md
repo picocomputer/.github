@@ -23,7 +23,7 @@ updating every day, something went wrong with the automation.
 <!-- compilers:start -->
 Last checked on 2026-09-26 UTC.
 
-- **cc65**: [picocomputer/cc65](https://github.com/picocomputer/cc65), branch `master`. The fork contains 1 commit not in the upstream repository. The Windows build is [cc65-snapshot-win64.zip](https://github.com/picocomputer/cc65/releases/download/prerelease/cc65-snapshot-win64.zip). On Linux and macOS, the install script builds cc65 from this repository.
+- **cc65**: [picocomputer/cc65](https://github.com/picocomputer/cc65), branch `master`. The fork contains 2 commits not in the upstream repository. The Windows build is [cc65-snapshot-win64.zip](https://github.com/picocomputer/cc65/releases/download/prerelease/cc65-snapshot-win64.zip). On Linux and macOS, the install script builds cc65 from this repository.
 
 - **llvm-mos**: [picocomputer/llvm-mos-sdk](https://github.com/picocomputer/llvm-mos-sdk), branch `main`. The fork contains 1 commit not in the upstream repository. The builds are for [Windows](https://github.com/picocomputer/llvm-mos-sdk/releases/download/prerelease/llvm-mos-windows.7z), [macOS](https://github.com/picocomputer/llvm-mos-sdk/releases/download/prerelease/llvm-mos-macos.tar.xz) and [Linux](https://github.com/picocomputer/llvm-mos-sdk/releases/download/prerelease/llvm-mos-linux.tar.xz).
 <!-- compilers:end -->
