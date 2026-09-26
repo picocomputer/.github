@@ -17,8 +17,8 @@ else
     [ "$arch" = x86_64 ] || fail "The prebuilt llvm-mos compiler for Linux is x86-64 only, and this machine is $arch."
 fi
 
-json=$(curl -fsSL "${PICOCOMPUTER_COMPILERS:-https://raw.githubusercontent.com/picocomputer/.github/main/compilers.json}")
-url=$(printf '%s\n' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["llvm-mos"]["downloads"][sys.argv[1]])' "$platform")
+repository=$(curl -fsSL "${PICOCOMPUTER_COMPILERS:-https://raw.githubusercontent.com/picocomputer/.github/main/install}/llvm-mos.txt")
+url="https://github.com/$repository/releases/download/prerelease/llvm-mos-$platform.tar.xz"
 
 root="$HOME/.rp6502"
 mkdir -p "$root"

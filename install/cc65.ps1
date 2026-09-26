@@ -6,12 +6,18 @@
     # TLS 1.2 and later.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-    $compilers = $env:PICOCOMPUTER_COMPILERS
-    if (-not $compilers) { $compilers = 'https://raw.githubusercontent.com/picocomputer/.github/main/compilers.json' }
-    if (Test-Path -LiteralPath $compilers) {
-        $url = (Get-Content -Raw -LiteralPath $compilers | ConvertFrom-Json).cc65.downloads.windows
+    $base = $env:PICOCOMPUTER_COMPILERS
+    if (-not $base) { $base = 'https://raw.githubusercontent.com/picocomputer/.github/main/install' }
+    if (Test-Path -LiteralPath $base) {
+        $repository = (Get-Content -Raw -LiteralPath (Join-Path $base 'cc65.txt')).Trim()
     } else {
-        $url = (Invoke-RestMethod $compilers).cc65.downloads.windows
+        $repository = (Invoke-RestMethod "$base/cc65.txt").Trim()
+    }
+    # Upstream cc65 publishes its Windows build only on SourceForge.
+    if ($repository -eq 'cc65/cc65') {
+        $url = 'https://sourceforge.net/projects/cc65/files/cc65-snapshot-win64.zip/download'
+    } else {
+        $url = "https://github.com/$repository/releases/download/prerelease/cc65-snapshot-win64.zip"
     }
 
     $root = Join-Path $env:USERPROFILE '.rp6502'

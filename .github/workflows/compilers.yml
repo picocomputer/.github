@@ -23,8 +23,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The new README and compilers.json wait in an artifact until any fork build
-  # that they link to is published.
+  # The new README and repository files wait in an artifact until any fork
+  # build that they link to is published.
   choose:
     runs-on: ubuntu-24.04
     outputs:
@@ -47,7 +47,8 @@ jobs:
           name: choice
           path: |
             profile/README.md
-            compilers.json
+            install/cc65.txt
+            install/llvm-mos.txt
 
       # The notes of a fork release contain the line
       # "Built from <repository>@<sha>", so a chosen fork whose head commit
@@ -61,7 +62,7 @@ jobs:
           check() {
             build=false
             sha=
-            if [ "$(jq -r ".\"$1\".fork" compilers.json)" = true ]; then
+            if [ "$(cat "install/$1.txt")" = "$2" ]; then
               sha=$(gh api "repos/$2/commits/$3" --jq .sha)
               body=$(gh release view "$4" --repo "$2" --json body --jq .body 2>&1) ||
                 [ "$body" = "release not found" ] || { echo "$body" >&2; exit 1; }
@@ -237,16 +238,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ -z "$(git status --porcelain -- profile/README.md compilers.json)" ]; then
+          if [ -z "$(git status --porcelain -- profile/README.md install/cc65.txt install/llvm-mos.txt)" ]; then
             exit 0
           fi
-          json=$(git status --porcelain -- compilers.json)
+          repos=$(git status --porcelain -- install/cc65.txt install/llvm-mos.txt)
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add profile/README.md compilers.json
+          git add profile/README.md install/cc65.txt install/llvm-mos.txt
           git commit -m "Check the compiler repositories"
           git push origin HEAD:main
-          if [ -n "$json" ]; then
+          if [ -n "$repos" ]; then
             gh workflow run test-install.yml
           fi
 
@@ -266,7 +267,7 @@ jobs:
         run: |
           set -euo pipefail
           prune() {
-            if [ "$(jq -r ".\"$1\".fork" compilers.json)" = false ]; then
+            if [ "$(cat "install/$1.txt")" != "$2" ]; then
               out=$(gh release delete "$3" --repo "$2" --cleanup-tag --yes 2>&1) ||
                 [ "$out" = "release not found" ] || { echo "$out" >&2; exit 1; }
             fi

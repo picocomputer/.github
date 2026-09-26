@@ -90,7 +90,9 @@ with open("profile/README.md", encoding="utf-8") as f:
 start, end = readme.index(START) + len(START), readme.index(END)
 readme = readme[:start] + "\n" + block + "\n" + readme[end:]
 
-with open("compilers.json", "w", encoding="utf-8") as f:
-    f.write(json.dumps({"cc65": cc65, "llvm-mos": mos}, indent=2) + "\n")
+with open("install/cc65.txt", "w", encoding="utf-8") as f:
+    f.write(cc65["repository"] + "\n")
+with open("install/llvm-mos.txt", "w", encoding="utf-8") as f:
+    f.write(mos["repository"] + "\n")
 with open("profile/README.md", "w", encoding="utf-8") as f:
     f.write(readme)

@@ -12,18 +12,13 @@ os=$(uname -s)
 if [ "$os" = Darwin ]; then
     deps="xcode-select --install"
 else
-    deps="sudo apt install git build-essential python3"
+    deps="sudo apt install build-essential"
 fi
-for tool in git make gcc python3; do
+for tool in make gcc; do
     command -v "$tool" >/dev/null || fail "$tool is missing. Install it with: $deps"
 done
 
-json=$(curl -fsSL "${PICOCOMPUTER_COMPILERS:-https://raw.githubusercontent.com/picocomputer/.github/main/compilers.json}")
-field() {
-    printf '%s\n' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["cc65"][sys.argv[1]])' "$1"
-}
-repository=$(field repository)
-ref=$(field ref)
+repository=$(curl -fsSL "${PICOCOMPUTER_COMPILERS:-https://raw.githubusercontent.com/picocomputer/.github/main/install}/cc65.txt")
 
 root="$HOME/.rp6502"
 mkdir -p "$root"
@@ -32,13 +27,19 @@ trap 'rm -rf "$tmp"' EXIT
 # dash skips the EXIT trap when a signal ends the shell.
 trap 'exit 1' HUP INT TERM
 
-info "The source is https://github.com/$repository.git at $ref."
-git clone --depth 1 --branch "$ref" "https://github.com/$repository.git" "$tmp/cc65"
+info "The source is https://github.com/$repository at master."
+curl -fsSL -o "$tmp/cc65.tar.gz" "https://github.com/$repository/archive/refs/heads/master.tar.gz"
+mkdir "$tmp/cc65"
+tar -xzf "$tmp/cc65.tar.gz" -C "$tmp/cc65" --strip-components=1
+# The cc65 Makefile reads the commit for the version line from git, and the
+# archive has no git data. GitHub writes the commit into the pax header that
+# is the second 512-byte block of the archive.
+sha=$(gzip -dc "$tmp/cc65.tar.gz" 2>/dev/null | dd bs=512 skip=1 count=1 2>/dev/null | tr -d '\0' | sed -n 's/^[0-9]* comment=//p')
 # cc65 searches for the include, lib and target folders relative to the bin
 # folder, so the build tree is a working install and make install is not needed.
-make -C "$tmp/cc65" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+make -C "$tmp/cc65" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" BUILD_ID="Git $(printf %.7s "$sha")"
 # The object files in libwrk and wrk are only used by the build.
-rm -rf "$tmp/cc65/.git" "$tmp/cc65/libwrk" "$tmp/cc65/wrk"
+rm -rf "$tmp/cc65/libwrk" "$tmp/cc65/wrk"
 rm -rf "$root/cc65"
 mv "$tmp/cc65" "$root/cc65"
 info "cc65 is installed in $root/cc65."

@@ -11,13 +11,14 @@
         throw 'llvm-mos install: Install CMake first: winget install -e --id Kitware.CMake'
     }
 
-    $compilers = $env:PICOCOMPUTER_COMPILERS
-    if (-not $compilers) { $compilers = 'https://raw.githubusercontent.com/picocomputer/.github/main/compilers.json' }
-    if (Test-Path -LiteralPath $compilers) {
-        $url = (Get-Content -Raw -LiteralPath $compilers | ConvertFrom-Json).'llvm-mos'.downloads.windows
+    $base = $env:PICOCOMPUTER_COMPILERS
+    if (-not $base) { $base = 'https://raw.githubusercontent.com/picocomputer/.github/main/install' }
+    if (Test-Path -LiteralPath $base) {
+        $repository = (Get-Content -Raw -LiteralPath (Join-Path $base 'llvm-mos.txt')).Trim()
     } else {
-        $url = (Invoke-RestMethod $compilers).'llvm-mos'.downloads.windows
+        $repository = (Invoke-RestMethod "$base/llvm-mos.txt").Trim()
     }
+    $url = "https://github.com/$repository/releases/download/prerelease/llvm-mos-windows.7z"
 
     $root = Join-Path $env:USERPROFILE '.rp6502'
     $dir = Join-Path $root 'llvm-mos'
