@@ -16,7 +16,7 @@
 The Picocomputer SDK builds programs with cc65 or llvm-mos. New Picocomputer
 features are often added to these compilers before their next release, so the
 compiler has to be a recent build. The curl and irm commands in the
-[RP6502-SDK](https://picocomputer.github.io/sdk.html#sdk-install).
+[RP6502-SDK](https://picocomputer.github.io/sdk.html#sdk-install)
 are currently routed according to the logic below. If the date isn't
 updating every day, something went wrong with the automation.
 

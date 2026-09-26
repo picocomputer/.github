@@ -76,7 +76,7 @@ mos["downloads"] = {"windows": base + "windows.7z",
                     "linux": base + "linux.tar.xz"}
 
 today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-block = (f"Last checked on {today}.\n\n"
+block = (f"Last checked on {today} UTC.\n\n"
          f"{bullet('cc65', cc65)} The Windows build is "
          f"[cc65-snapshot-win64.zip]({cc65['downloads']['windows']}). "
          "On Linux and macOS, the install script builds cc65 from this "
