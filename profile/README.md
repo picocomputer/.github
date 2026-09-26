@@ -1,49 +1,24 @@
-# Picocomputer 6502
+## Documentation
 
-**Start here: [picocomputer.github.io](https://picocomputer.github.io/)**
+**Start here**: [picocomputer.github.io](https://picocomputer.github.io/)<br/>
 
-The documentation and the guide to writing programs.
-
-## Downloads
+## Binary Downloads
 
 - [Firmware and emulators](https://github.com/picocomputer/rp6502/releases/latest):
-  the Pico firmware, and the emulator for Windows, macOS, Linux, RetroArch,
-  Android and the Analogue Pocket.
+  the Pi Pico 2 firmware and all emulator binaries.
 - [Example programs](https://github.com/picocomputer/examples/releases/latest):
-  ROMs and tools built from the examples repository.
+  simple ROMs built from the examples repository.
 - [Microsoft BASIC](https://github.com/picocomputer/msbasic/releases/latest):
-  `basic.rp6502`.
+  enhanced with our line editor and more token space.
 
 ## Compilers
 
 The Picocomputer SDK builds programs with cc65 or llvm-mos. New Picocomputer
 features are often added to these compilers before their next release, so the
-compiler has to be a recent build. The cc65 and llvm-mos packages in apt,
-Homebrew, MacPorts and other package managers are too old. The other tools,
-such as CMake and Python, do not need to be this current.
-
-On Linux and macOS:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/picocomputer/.github/main/install/cc65.sh | sh
-curl -fsSL https://raw.githubusercontent.com/picocomputer/.github/main/install/llvm-mos.sh | sh
-```
-
-On Windows, in PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/picocomputer/.github/main/install/cc65.ps1 | iex
-irm https://raw.githubusercontent.com/picocomputer/.github/main/install/llvm-mos.ps1 | iex
-```
-
-Each command installs the best build at the moment into `.rp6502` in the home
-folder and adds it to PATH. Run the command again to update. The other tools
-and their install steps are in
+compiler has to be a recent build. The curl and irm commands in the
 [RP6502-SDK](https://picocomputer.github.io/sdk.html#sdk-install).
-
-The builds are made from the repositories below. This list is checked and
-updated automatically once a day, and the install commands use the same
-repositories.
+are currently routed according to the logic below. If the date isn't
+updating every day, something went wrong with the automation.
 
 <!-- compilers:start -->
 Last checked on 2026-09-26.
