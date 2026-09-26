@@ -1,0 +1,91 @@
+name: Test install
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - install/**
+      - compilers.json
+      - .github/workflows/test-install.yml
+  schedule:
+    - cron: "37 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            login: bash
+          - os: macos-15
+            login: zsh
+          - os: windows-2025
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: picocomputer/rp6502-sdk
+          path: rp6502-sdk
+
+      # A dispatched run follows a new compilers.json, and
+      # raw.githubusercontent.com can serve the previous file for minutes after
+      # a push. Other runs read the default URL, like an install on a user's
+      # machine.
+      - name: Install
+        if: runner.os != 'Windows'
+        env:
+          PICOCOMPUTER_COMPILERS: ${{ github.event_name == 'workflow_dispatch' && format('file://{0}/compilers.json', github.workspace) || '' }}
+          # On macOS the profile file depends on SHELL. The login shell on the
+          # macOS runners is bash, and on a new Mac it is zsh.
+          SHELL: /bin/${{ matrix.login }}
+        run: |
+          sh install/cc65.sh
+          sh install/llvm-mos.sh
+
+      # Users run the install command in Windows PowerShell 5.1, because it
+      # ships with Windows and PowerShell 7 does not.
+      - name: Install
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          PICOCOMPUTER_COMPILERS: ${{ github.event_name == 'workflow_dispatch' && format('{0}\compilers.json', github.workspace) || '' }}
+        run: |
+          iex (Get-Content -Raw install/cc65.ps1)
+          iex (Get-Content -Raw install/llvm-mos.ps1)
+
+      # A new login shell reads the profile file that the install scripts
+      # changed.
+      - name: Check PATH and build the SDK
+        if: runner.os != 'Windows'
+        working-directory: rp6502-sdk
+        run: |
+          ${{ matrix.login }} -lc 'cl65 --version && mos-rp6502-clang --version'
+          ${{ matrix.login }} -lc 'cmake --preset cc65/Release && cmake --build --preset cc65/Release'
+          ${{ matrix.login }} -lc 'cmake --preset llvm-mos/Release && cmake --build --preset llvm-mos/Release'
+
+      # A new PowerShell window starts with the Path from the registry. The
+      # Windows install steps in the SDK docs include setx CMAKE_GENERATOR Ninja.
+      - name: Check PATH and build the SDK
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: rp6502-sdk
+        env:
+          CMAKE_GENERATOR: Ninja
+        run: |
+          # Without this, PowerShell continues after a program fails, and only
+          # the last exit code fails the step.
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          cl65 --version
+          mos-rp6502-clang.bat --version
+          cmake --preset cc65/Release
+          cmake --build --preset cc65/Release
+          cmake --preset llvm-mos/Release
+          cmake --build --preset llvm-mos/Release

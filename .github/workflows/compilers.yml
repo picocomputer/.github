@@ -1,0 +1,275 @@
+name: Compilers
+
+on:
+  # The last-checked date in the README makes a commit every day, and that
+  # activity keeps GitHub from disabling the schedules in this repository.
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - profile/README.md
+      - .github/scripts/**
+      - .github/workflows/compilers.yml
+
+permissions:
+  contents: read
+
+# Publishing deletes a release and creates it again, so two runs at once could
+# delete the release that the other run just created.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # The new README and compilers.json wait in an artifact until any fork build
+  # that they link to is published.
+  choose:
+    runs-on: ubuntu-24.04
+    outputs:
+      cc65-build: ${{ steps.check.outputs.cc65-build }}
+      cc65-sha: ${{ steps.check.outputs.cc65-sha }}
+      llvm-mos-build: ${{ steps.check.outputs.llvm-mos-build }}
+      llvm-mos-sha: ${{ steps.check.outputs.llvm-mos-sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Choose fork or upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/compilers.py
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: choice
+          path: |
+            profile/README.md
+            compilers.json
+
+      # The notes of a fork release contain the line
+      # "Built from <repository>@<sha>", so a chosen fork whose head commit
+      # matches that line needs no new build.
+      - name: Check the fork builds
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          check() {
+            build=false
+            sha=
+            if [ "$(jq -r ".\"$1\".fork" compilers.json)" = true ]; then
+              sha=$(gh api "repos/$2/commits/$3" --jq .sha)
+              body=$(gh release view "$4" --repo "$2" --json body --jq .body 2>&1) ||
+                [ "$body" = "release not found" ] || { echo "$body" >&2; exit 1; }
+              case $body in
+                *"Built from $2@$sha"*) ;;
+                *) build=true ;;
+              esac
+            fi
+            echo "$1 build=$build"
+            echo "$1-sha=$sha" >> "$GITHUB_OUTPUT"
+            echo "$1-build=$build" >> "$GITHUB_OUTPUT"
+          }
+          check cc65 picocomputer/cc65 master prerelease
+          check llvm-mos picocomputer/llvm-mos-sdk main prerelease
+
+  cc65:
+    needs: choose
+    if: needs.choose.outputs.cc65-build == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: picocomputer/cc65
+          ref: ${{ needs.choose.outputs.cc65-sha }}
+
+      # The commands match .github/workflows/snapshot-on-push-master.yml in
+      # cc65/cc65. libsrc is assembled with ../bin/ca65, so the native tools
+      # are built first.
+      - name: Build
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+          make -j"$(nproc)"
+          make -C src clean
+          make -j"$(nproc)" bin CROSS_COMPILE=x86_64-w64-mingw32-
+          make zip
+          mv cc65.zip cc65-snapshot-win64.zip
+
+      - uses: actions/create-github-app-token@v2
+        id: token
+        with:
+          app-id: ${{ vars.FORK_BUILDS_APP_ID }}
+          private-key: ${{ secrets.FORK_BUILDS_APP_KEY }}
+          owner: picocomputer
+          repositories: cc65
+
+      # Creating the release again moves the tag to the built commit.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          SHA: ${{ needs.choose.outputs.cc65-sha }}
+        run: |
+          set -euo pipefail
+          out=$(gh release delete prerelease --repo picocomputer/cc65 --cleanup-tag --yes 2>&1) ||
+            [ "$out" = "release not found" ] || { echo "$out" >&2; exit 1; }
+          gh release create prerelease cc65-snapshot-win64.zip --repo picocomputer/cc65 \
+            --target "$SHA" --prerelease --title "cc65 prerelease" \
+            --notes "Built from picocomputer/cc65@$SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  llvm-mos:
+    needs: choose
+    if: needs.choose.outputs.llvm-mos-build == 'true'
+    strategy:
+      matrix:
+        os: [windows-2025, macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: picocomputer/llvm-mos-sdk
+          ref: ${{ needs.choose.outputs.llvm-mos-sha }}
+
+      # The fetch, build and archive steps match .github/workflows/package.yml
+      # in llvm-mos/llvm-mos-sdk. Ninja is installed on these runner images, so
+      # the ninja install steps from package.yml are left out.
+      - name: Fetch the latest Ubuntu llvm-mos release.
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          curl -LO https://github.com/llvm-mos/llvm-mos/releases/download/llvm-mos-linux-main/llvm-mos-linux-main.tar.xz
+          tar -xvf llvm-mos-linux-main.tar.xz
+      - name: Fetch the latest Windows llvm-mos release.
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          curl -LO https://github.com/llvm-mos/llvm-mos/releases/download/llvm-mos-windows-main/llvm-mos-windows-main.7z
+          7z x llvm-mos-windows-main.7z
+      - name: Fetch the latest Mac llvm-mos release.
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          curl -LO https://github.com/llvm-mos/llvm-mos/releases/download/llvm-mos-darwin-main/llvm-mos-darwin-main.tar.xz
+          tar -xvf llvm-mos-darwin-main.tar.xz
+
+      - name: Build the SDK.
+        run: |
+          mkdir build
+          cd build
+          cmake -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/llvm-mos -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -G "Ninja" -DLLVM_MOS_BUILD_EXAMPLES=Off ..
+          ninja install
+
+      - name: Archive the Linux SDK.
+        if: startsWith(matrix.os, 'ubuntu')
+        run: tar -cJvf llvm-mos-linux.tar.xz llvm-mos
+      - name: Archive the Windows SDK.
+        if: startsWith(matrix.os, 'windows')
+        run: 7z a llvm-mos-windows.7z llvm-mos
+      - name: Archive the Mac OS SDK.
+        if: startsWith(matrix.os, 'macos')
+        run: tar -cJvf llvm-mos-macos.tar.xz llvm-mos
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: llvm-mos-${{ runner.os }}
+          path: |
+            llvm-mos-linux.tar.xz
+            llvm-mos-windows.7z
+            llvm-mos-macos.tar.xz
+
+  llvm-mos-publish:
+    needs: [choose, llvm-mos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: llvm-mos-*
+          merge-multiple: true
+
+      - uses: actions/create-github-app-token@v2
+        id: token
+        with:
+          app-id: ${{ vars.FORK_BUILDS_APP_ID }}
+          private-key: ${{ secrets.FORK_BUILDS_APP_KEY }}
+          owner: picocomputer
+          repositories: llvm-mos-sdk
+
+      # Creating the release again moves the tag to the built commit.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          SHA: ${{ needs.choose.outputs.llvm-mos-sha }}
+        run: |
+          set -euo pipefail
+          out=$(gh release delete prerelease --repo picocomputer/llvm-mos-sdk --cleanup-tag --yes 2>&1) ||
+            [ "$out" = "release not found" ] || { echo "$out" >&2; exit 1; }
+          gh release create prerelease llvm-mos-linux.tar.xz llvm-mos-windows.7z llvm-mos-macos.tar.xz \
+            --repo picocomputer/llvm-mos-sdk --target "$SHA" --prerelease --title "llvm-mos SDK prerelease" \
+            --notes "Built from picocomputer/llvm-mos-sdk@$SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+  # The links change only after every fork build they point to is published.
+  # Without !cancelled(), a skipped build job would skip this job too.
+  update:
+    needs: [choose, cc65, llvm-mos-publish]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      # The commit goes on top of the commit that the choice was made from, so
+      # a push to main during this run makes the push below fail instead of
+      # undoing that push.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: choice
+
+      # A push made with GITHUB_TOKEN starts no workflows, so the install tests
+      # are started here by dispatch.
+      - name: Commit the changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain -- profile/README.md compilers.json)" ]; then
+            exit 0
+          fi
+          json=$(git status --porcelain -- compilers.json)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add profile/README.md compilers.json
+          git commit -m "Check the compiler repositories"
+          git push origin HEAD:main
+          if [ -n "$json" ]; then
+            gh workflow run test-install.yml
+          fi
+
+      - uses: actions/create-github-app-token@v2
+        id: token
+        with:
+          app-id: ${{ vars.FORK_BUILDS_APP_ID }}
+          private-key: ${{ secrets.FORK_BUILDS_APP_KEY }}
+          owner: picocomputer
+          repositories: cc65,llvm-mos-sdk
+
+      # A fork has a release only while the links send users to it. The links
+      # are already updated when a release is deleted here.
+      - name: Delete unused fork releases
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          prune() {
+            if [ "$(jq -r ".\"$1\".fork" compilers.json)" = false ]; then
+              out=$(gh release delete "$3" --repo "$2" --cleanup-tag --yes 2>&1) ||
+                [ "$out" = "release not found" ] || { echo "$out" >&2; exit 1; }
+            fi
+          }
+          prune cc65 picocomputer/cc65 prerelease
+          prune llvm-mos picocomputer/llvm-mos-sdk prerelease
