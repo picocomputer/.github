@@ -1,1 +1,1 @@
-llvm-mos/llvm-mos-sdk
+picocomputer/llvm-mos-sdk
