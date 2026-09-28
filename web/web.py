@@ -4,24 +4,21 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause OR Unlicense
 #
-"""Builds the web players that a repository's markdown asks for.
+"""Publishes the web zips that a repository's markdown names.
 
 Each player is an HTML comment in a markdown file that git tracks:
 
     <!-- rp6502
     preset: cc65/Release
-    target: hello
+    publish: hello.zip
     -->
 
-The target is built with the CMake preset, and the player is written to
-<out>/<target>/index.html, with rp6502.js and rp6502.wasm from the itch.io
-zip of an rp6502 release in <out>. The Linux emulator of that release runs
-the ROM for 120 frames, or the number given by the frames key, and the
-screen is written to <out>/<target>/screenshot.png, 640 pixels wide, for a
-README to show. Run it from the root of the repository.
-The project's own tools/ are used as committed, including BASIC in
-tools/basic.rp6502, unless --update-tools asks for the latest of each.
-The keys are described at https://picocomputer.github.io/web.html.
+The CMake preset is built in a folder of its own, and hello.zip, which an
+rp6502_web() call makes, is unpacked to <out>/hello/. The Linux emulator
+of the same build runs the ROM for 120 frames, or the number given by the
+frames key, and the screen is written to <out>/hello/screenshot.png, 640
+pixels wide, for a README to show. Run it from the root of the
+repository. The keys are described at https://picocomputer.github.io/web.html.
 """
 
 import argparse
@@ -41,11 +38,11 @@ import urllib.request
 import zipfile
 import zlib
 
-REQUIRED = ("preset", "target")
-SETTINGS = ("folder", "title", "args", "install", "image", "db", "bg",
-            "filter", "overlay", "frames")
+REQUIRED = ("preset", "publish")
+SETTINGS = ("folder", "frames")
 COMPILERS = ("cc65", "llvm-mos")
 INSTALL_URL = "https://raw.githubusercontent.com/picocomputer/.github/main/install"
+LATEST = "release picocomputer/rp6502 latest"
 
 
 class WebError(Exception):
@@ -75,7 +72,7 @@ def read_blocks():
 
 
 def parse_block(body, where):
-    block = {"where": where, "footer": []}
+    block = {"where": where}
     for line in body.splitlines():
         line = line.strip()
         if not line:
@@ -84,21 +81,20 @@ def parse_block(body, where):
         key, value = key.strip(), value.strip()
         if not sep:
             raise WebError(f"{where}: '{line}' is not 'key: value'")
-        if key == "footer":
-            block["footer"].append(value)
-        elif key not in REQUIRED + SETTINGS:
-            raise WebError(f"{where}: unknown key '{key}'")
-        elif key in block:
+        if key not in REQUIRED + SETTINGS:
+            raise WebError(f"{where}: unknown key '{key}'; the keys are "
+                           f"{', '.join(REQUIRED + SETTINGS)}, and the page is set "
+                           "up by rp6502_web() in CMakeLists.txt")
+        if key in block:
             raise WebError(f"{where}: '{key}' is given twice")
-        else:
-            block[key] = value
+        block[key] = value
     for key in REQUIRED:
         if not block.get(key):
             raise WebError(f"{where}: '{key}' is missing")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", block["target"]):
-        raise WebError(f"{where}: target '{block['target']}' cannot be a folder name on the site")
-    if block.get("overlay", "yes") not in ("yes", "no"):
-        raise WebError(f"{where}: overlay is yes or no")
+    if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*\.zip", block["publish"]):
+        raise WebError(f"{where}: publish '{block['publish']}' is not a zip that "
+                       "rp6502_web() makes, such as game.zip")
+    block["name"] = block["publish"][:-len(".zip")]
     if not re.fullmatch(r"[1-9][0-9]*", block.get("frames", "1")):
         raise WebError(f"{where}: frames is a whole number above 0, such as 300")
     block.setdefault("folder", ".")
@@ -126,139 +122,134 @@ def use_compiler(preset, ci):
 
 
 def update_tools(folder):
-    """The latest tools and emulator, and the latest BASIC release, which
-    the next configure fetches because tools/basic.rp6502 is gone."""
+    """The latest tools and emulator."""
     tools = os.path.join(folder, "tools")
     print(f"Updating {tools}", flush=True)
     subprocess.run(["cmake", "-P", os.path.join(tools, "rp6502.cmake")], check=True)
-    basic = os.path.join(tools, "basic.rp6502")
-    if os.path.exists(basic):
-        os.remove(basic)
 
 
-def build(folder, preset):
-    """Configures and builds the preset in folder, and returns the build
-    folder that CMake reports."""
+def build(folder, preset, build_dir, emulator):
+    """Configures the preset of folder into build_dir, never the build folder
+    of the project, and builds it."""
     print(f"Building {preset} in {folder}", flush=True)
-    run = subprocess.run(["cmake", "--preset", preset], cwd=folder,
-                         capture_output=True, text=True)
-    sys.stdout.write(run.stdout)
-    sys.stdout.write(run.stderr)
-    if run.returncode:
+    configure = ["cmake", "--preset", preset, "-B", build_dir]
+    if emulator:
+        configure.append(f"-DRP6502_WEB_EMULATOR={emulator}")
+    if subprocess.run(configure, cwd=folder).returncode:
         raise WebError(f"cmake --preset {preset} failed in {folder}")
-    m = re.search(r"^-- Build files have been written to: (.+)$", run.stdout, re.M)
-    if not m:
-        raise WebError(f"cmake --preset {preset} in {folder} names no build folder")
-    if subprocess.run(["cmake", "--build", "--preset", preset], cwd=folder).returncode:
-        raise WebError(f"cmake --build --preset {preset} failed in {folder}")
-    return os.path.join(folder, m.group(1).strip())
+    if subprocess.run(["cmake", "--build", build_dir]).returncode:
+        raise WebError(f"building {preset} failed in {folder}")
 
 
-def find_rom(build_dir, block):
-    """The one <target>.rp6502 ROM in the build folder. CMakeFiles holds
-    folders with that name and other programs, so it is skipped."""
-    name = block["target"] + ".rp6502"
-    found = []
-    for dirpath, dirnames, filenames in os.walk(build_dir):
-        dirnames[:] = [d for d in dirnames if d != "CMakeFiles"]
-        if name in filenames:
-            path = os.path.join(dirpath, name)
-            with open(path, "rb") as f:
-                if f.read(8) == b"#!RP6502":
-                    found.append(path)
-    if len(found) != 1:
-        raise WebError(f"{block['where']}: {len(found)} copies of {name} in "
-                       f"{build_dir} after building {block['preset']}, not 1")
-    return found[0]
+def unpack(zip_path, folder):
+    """The zip unpacked into folder, refusing paths that would leave it."""
+    with zipfile.ZipFile(zip_path) as archive:
+        for name in archive.namelist():
+            parts = name.replace("\\", "/").split("/")
+            if name.startswith("/") or ".." in parts or ":" in parts[0]:
+                raise WebError(f"{zip_path} has an unsafe path: {name}")
+        if "index.html" not in archive.namelist():
+            raise WebError(f"{zip_path} has no index.html at its root")
+        archive.extractall(folder)
 
 
-def github_json(url):
+def page_config(page):
+    """rom, args, install and title as the inline scripts of the page set
+    them, the last one for a key winning. A value is read as a quoted
+    string or an array of quoted strings, the forms rp6502_web() and the
+    release page write."""
+    with open(page, encoding="utf-8") as f:
+        text = f.read()
+    scripts = "\n".join(re.findall(r"<script>(.*?)</script>", text, re.S))
+    string = r"'([^'\\]*)'|\"([^\"\\]*)\""
+    config = {}
+    for m in re.finditer(r"\b(rom|args|install|title)\s*[:=]\s*", scripts):
+        key, rest = m.group(1), scripts[m.end():]
+        one = re.match(string, rest)
+        many = re.match(r"\[\s*((?:(?:" + string + r")\s*,?\s*)*)\]", rest)
+        if key in ("rom", "title") and one:
+            config[key] = one.group(1) if one.group(1) is not None else one.group(2)
+        elif key in ("args", "install") and many:
+            config[key] = [a if a else b for a, b in re.findall(string, many.group(1))]
+        else:
+            raise WebError(f"{page}: '{key}' is set to '{rest.splitlines()[0].strip()}', "
+                           "which web.py does not read; write a quoted string, or an "
+                           "array of them for args and install")
+    if not config.get("rom"):
+        raise WebError(f"{page} sets no CONFIG.rom")
+    return config
+
+
+def github(url, token=True):
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.load(response)
+    key = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token and key:
+        request.add_header("Authorization", f"Bearer {key}")
+    return request
 
 
-def fetch_emulator(release):
-    """rp6502.js, rp6502.wasm and index.html from the itch.io zip, and
-    rp6502-emu from the Linux build for this computer when the release has
-    one."""
-    api = "https://api.github.com/repos/picocomputer/rp6502/releases/"
-    info = github_json(api + ("latest" if release == "latest" else f"tags/{release}"))
-    urls = [a["browser_download_url"] for a in info["assets"]
-            if a["name"].endswith("-itch.io.zip")]
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args):
+        return None
+
+
+def download(url, token):
+    """The file at url. An artifact answers with a redirect to the storage
+    host, which is followed without the token."""
+    try:
+        opener = urllib.request.build_opener(NoRedirect)
+        with opener.open(github(url, token), timeout=120) as response:
+            return response.read()
+    except urllib.error.HTTPError as e:
+        if e.code not in (301, 302, 303, 307, 308):
+            raise
+        with urllib.request.urlopen(e.headers["Location"], timeout=120) as response:
+            return response.read()
+
+
+def fetch_linux_emulator(source, where, tmp):
+    """rp6502-emu from the Linux build that goes with the web zip of a
+    player, as rp6502_web() recorded it, or None."""
+    if source.startswith("file "):
+        print(f"warning: {where}: the emulator is {source[5:]}, so the screenshot "
+              "uses the Linux emulator of the latest release", file=sys.stderr)
+        source = LATEST
+    kind, repo, ref = source.split()
+    suffix = f"-linux-{platform.machine()}.tar.gz"
+    if platform.system() != "Linux":
+        print("warning: the players have no screenshots, because this computer "
+              "runs no Linux emulator", file=sys.stderr)
+        return None
+    api = f"https://api.github.com/repos/{repo}"
+    if kind == "release":
+        info = json.load(urllib.request.urlopen(
+            github(f"{api}/releases/" + ("latest" if ref == "latest" else f"tags/{ref}")),
+            timeout=60))
+        urls = [a["browser_download_url"] for a in info["assets"] if a["name"].endswith(suffix)]
+        token = False
+    else:
+        info = json.load(urllib.request.urlopen(
+            github(f"{api}/actions/runs/{ref}/artifacts?per_page=100"), timeout=60))
+        urls = [f"{api}/actions/artifacts/{a['id']}/zip" for a in info["artifacts"]
+                if a["name"].endswith(suffix) and not a["expired"]]
+        token = True
     if len(urls) != 1:
-        raise WebError(f"rp6502 release {info['tag_name']} has no itch.io zip")
-    print(f"Fetching the emulator from {info['tag_name']}", flush=True)
-    with urllib.request.urlopen(urls[0], timeout=120) as response:
-        archive = zipfile.ZipFile(io.BytesIO(response.read()))
-    files = {name: archive.read(name) for name in ("rp6502.js", "rp6502.wasm", "index.html")}
-    linux = f"-linux-{platform.machine()}.tar.gz"
-    urls = [a["browser_download_url"] for a in info["assets"]
-            if platform.system() == "Linux" and a["name"].endswith(linux)]
-    if len(urls) != 1:
-        print(f"warning: rp6502 release {info['tag_name']} has no emulator for this "
-              "computer, so the players have no screenshots", file=sys.stderr)
-        return files
-    with urllib.request.urlopen(urls[0], timeout=120) as response:
-        with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
-            files["rp6502-emu"] = tar.extractfile("rp6502-emu").read()
-    return files
+        print(f"warning: {where}: {source} has no {suffix}, so there is no screenshot",
+              file=sys.stderr)
+        return None
+    print(f"Fetching the Linux emulator of {source}", flush=True)
+    with tarfile.open(fileobj=io.BytesIO(download(urls[0], token))) as tar:
+        data = tar.extractfile("rp6502-emu").read()
+    emu = os.path.join(tmp, re.sub(r"[^A-Za-z0-9]", "_", source))
+    with open(emu, "wb") as f:
+        f.write(data)
+    os.chmod(emu, 0o755)
+    return emu
 
 
-def repository():
-    """owner/name, from GitHub Actions or the origin remote."""
-    if os.environ.get("GITHUB_REPOSITORY"):
-        return os.environ["GITHUB_REPOSITORY"]
-    url = git("remote", "get-url", "origin").strip()
-    m = re.search(r"github\.com[:/](.+?/.+?)(\.git)?$", url)
-    return m.group(1) if m else ""
-
-
-def page(template, block, files, repo):
-    """The player's index.html: the release's page with CONFIG, the footer
-    and the path to rp6502.js filled in."""
-    words = lambda key: block.get(key, "").split()
-    config = {
-        "title": block.get("title", ""),
-        "rom": files[0],
-        "args": words("args"),
-        "install": [os.path.basename(p) for p in words("install")],
-        "db": block.get("db", ""),
-        "bg": block.get("bg", ""),
-        "filter": block.get("filter", ""),
-        "overlay": "overlay" if block.get("overlay", "yes") == "yes" else "",
-        "footer": "footer" if block["footer"] else "",
-        "image": os.path.basename(block["image"]) if "image" in block else "",
-    }
-    lines = "".join(f"\n    {json.dumps(k)}: {json.dumps(v)}," for k, v in config.items())
-    text, n = re.subn(r"var CONFIG = \{.*?\};", lambda m: "var CONFIG = {" + lines + "\n  };",
-                      template, count=1, flags=re.S)
-    if n != 1:
-        raise WebError("the release's index.html has no CONFIG")
-    credits = '<a href="https://picocomputer.github.io" target="_blank">Picocomputer 6502</a>'
-    if repo:
-        credits = (f'<a href="https://github.com/{html.escape(repo)}" target="_blank">'
-                   f"{html.escape(repo)}</a> &middot; " + credits)
-    footer = ('<div class="footer">'
-              + "".join(f"\n    <p>{html.escape(line)}</p>" for line in block["footer"])
-              + f'\n    <p class="credits">{credits}</p>\n  </div>')
-    text, n = re.subn(r'(<template id="footer">).*?(</template>)',
-                      lambda m: m.group(1) + "\n  " + footer + "\n" + m.group(2),
-                      text, count=1, flags=re.S)
-    if n != 1:
-        raise WebError("the release's index.html has no footer template")
-    if 'src="rp6502.js"' not in text:
-        raise WebError("the release's index.html does not load rp6502.js")
-    return text.replace('src="rp6502.js"', 'src="../rp6502.js"')
-
-
-def screenshot(emu, block, folder):
-    """Runs the player's ROM, install files and arguments for the frames of
-    the block, and writes the screen to screenshot.png in the player's
-    folder."""
+def screenshot(emu, block, folder, config):
+    """Runs the ROM, install files and arguments of the page for the frames
+    of the block, and writes the screen to screenshot.png."""
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, "raw.png")
         # A fixed seed and an empty save folder give the same screenshot on
@@ -267,11 +258,11 @@ def screenshot(emu, block, folder):
                    "--save-dir", os.path.join(tmp, "saves")]
         if "frames" in block:
             command += ["--frames", block["frames"]]
-        for path in block.get("install", "").split():
-            command += ["--install", os.path.join(folder, os.path.basename(path))]
-        command.append(os.path.join(folder, block["target"] + ".rp6502"))
-        if block.get("args"):
-            command += ["--", *block["args"].split()]
+        for path in config.get("install", []):
+            command += ["--install", os.path.join(folder, path)]
+        command.append(os.path.join(folder, config["rom"]))
+        if config.get("args"):
+            command += ["--", *config["args"]]
         if subprocess.run(command, stdout=subprocess.DEVNULL).returncode:
             raise WebError(f"{block['where']}: the emulator wrote no screenshot")
         write_wide_png(raw, os.path.join(folder, "screenshot.png"))
@@ -317,88 +308,68 @@ def write_wide_png(raw, png):
                 + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
 
 
-def write_site(out, emulator, players, repo, emu):
-    shutil.rmtree(out, ignore_errors=True)
-    os.makedirs(out)
-    for name in ("rp6502.js", "rp6502.wasm"):
-        with open(os.path.join(out, name), "wb") as f:
-            f.write(emulator[name])
-    template = emulator["index.html"].decode("utf-8")
-    items = []
-    for block, files in players:
-        folder = os.path.join(out, block["target"])
-        os.makedirs(folder)
-        for path in files:
-            shutil.copy2(path, folder)
-        names = [os.path.basename(p) for p in files]
-        with open(os.path.join(folder, "index.html"), "w", encoding="utf-8") as f:
-            f.write(page(template, block, names, repo))
-        if emu:
-            screenshot(emu, block, folder)
-        title = block.get("title") or block["target"]
-        items.append(f'  <li><a href="{block["target"]}/">{html.escape(title)}</a></li>')
-    with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
-        f.write("<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n"
-                "<title>Web players</title>\n<ul>\n" + "\n".join(items) + "\n</ul>\n")
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--ci", action="store_true",
                         help="install the compilers the presets need")
     parser.add_argument("--update-tools", action="store_true",
-                        help="build with the latest tools and BASIC, as a template's CI does")
-    parser.add_argument("--rp6502", default="latest",
-                        help="rp6502 release tag for the emulator (default: latest)")
+                        help="build with the latest tools, as a template's CI does")
+    parser.add_argument("--emulator", default="",
+                        help="the web zip for every rp6502_web(), as its EMULATOR takes it")
     parser.add_argument("--out", default="build/web", help="site folder (default: build/web)")
     args = parser.parse_args()
 
     blocks, markdown = read_blocks()
     if not blocks:
         raise WebError("no <!-- rp6502 --> blocks in the markdown")
-    targets = [b["target"] for b in blocks]
     for b in blocks:
-        if targets.count(b["target"]) > 1:
-            raise WebError(f"{b['where']}: target '{b['target']}' is used twice")
+        same = [o["where"] for o in blocks if o["name"] == b["name"]]
+        if len(same) > 1:
+            raise WebError(f"{' and '.join(same)} both publish {b['publish']}")
 
     if args.update_tools:
         for folder in dict.fromkeys(b["folder"] for b in blocks):
             update_tools(folder)
 
-    built = {}
-    players = []
-    for block in blocks:
-        folder, preset = block["folder"], block["preset"]
-        if (folder, preset) not in built:
-            use_compiler(preset, args.ci)
-            built[(folder, preset)] = build(folder, preset)
-        files = [find_rom(built[(folder, preset)], block)]
-        files += [os.path.join(folder, p) for p in block.get("install", "").split()]
-        if "image" in block:
-            files.append(os.path.join(folder, block["image"]))
-        names = [os.path.basename(p).lower() for p in files]
-        for path in files:
-            if not os.path.isfile(path):
-                raise WebError(f"{block['where']}: {path} is not a file")
-            if names.count(os.path.basename(path).lower()) > 1:
-                raise WebError(f"{block['where']}: two files are named {os.path.basename(path)}")
-        players.append((block, files))
-        if not re.search(rf"github\.io/[^\s)\"']*?/{re.escape(block['target'])}/?[\s)\"']",
-                         markdown):
-            print(f"warning: {block['where']}: no link to the {block['target']} player",
-                  file=sys.stderr)
-
-    emulator = fetch_emulator(args.rp6502)
+    shutil.rmtree(args.out, ignore_errors=True)
+    os.makedirs(args.out)
+    items = []
     with tempfile.TemporaryDirectory() as tmp:
-        emu = None
-        if "rp6502-emu" in emulator:
-            emu = os.path.join(tmp, "rp6502-emu")
-            with open(emu, "wb") as f:
-                f.write(emulator["rp6502-emu"])
-            os.chmod(emu, 0o755)
-        write_site(args.out, emulator, players, repository(), emu)
-    for block, _ in players:
-        print(f"{block['target']}/ from {block['preset']}")
+        built = {}
+        emulators = {}
+        for block in blocks:
+            folder, preset = block["folder"], block["preset"]
+            if (folder, preset) not in built:
+                use_compiler(preset, args.ci)
+                build_dir = os.path.join(tmp, f"build{len(built)}")
+                build(folder, preset, build_dir, args.emulator)
+                built[(folder, preset)] = build_dir
+            web = os.path.join(built[(folder, preset)], "web")
+            zip_path = os.path.join(web, block["publish"])
+            if not os.path.isfile(zip_path):
+                raise WebError(f"{block['where']}: building {preset} in {folder} made no "
+                               f"{block['publish']}; rp6502_web(<rom> OUTPUT "
+                               f"{block['publish']}) in CMakeLists.txt makes it")
+            site = os.path.join(args.out, block["name"])
+            unpack(zip_path, site)
+            config = page_config(os.path.join(site, "index.html"))
+            with open(os.path.join(web, block["name"] + ".emulator")) as f:
+                source = f.read().strip()
+            if source not in emulators:
+                emulators[source] = fetch_linux_emulator(source, block["where"], tmp)
+            if emulators[source]:
+                screenshot(emulators[source], block, site, config)
+            title = config.get("title") or block["name"]
+            items.append(f'  <li><a href="{html.escape(block["name"])}/">{html.escape(title)}</a></li>')
+            if not re.search(rf"github\.io/[^\s)\"']*?/{re.escape(block['name'])}/?[\s)\"']",
+                             markdown):
+                print(f"warning: {block['where']}: no link to the {block['name']} player",
+                      file=sys.stderr)
+    with open(os.path.join(args.out, "index.html"), "w", encoding="utf-8") as f:
+        f.write("<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n"
+                "<title>Web players</title>\n<ul>\n" + "\n".join(items) + "\n</ul>\n")
+    for block in blocks:
+        print(f"{block['name']}/ from {block['publish']}, {block['preset']}")
     print(f"Site in {args.out}")
 
 

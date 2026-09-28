@@ -9,18 +9,23 @@
 #         pages: write
 #         id-token: write
 #
-# web/web.py describes the markdown, and so does
-# https://picocomputer.github.io/web.html.
+# A caller can forward workflow_dispatch inputs as source and emulator;
+# an empty value is the default. web/web.py describes the markdown, and so
+# does https://picocomputer.github.io/web.html.
 
 name: Web players
 
 on:
   workflow_call:
     inputs:
-      rp6502:
-        description: rp6502 release for rp6502.js and rp6502.wasm, such as v0.35
+      source:
+        description: branch, tag or commit of the calling repository to build; empty is the pushed commit
         type: string
-        default: latest
+        default: ''
+      emulator:
+        description: web zip for every rp6502_web(), as EMULATOR takes it, such as v0.35; empty is the one in CMakeLists.txt
+        type: string
+        default: ''
       update-tools:
         description: build with the latest tools and BASIC instead of the committed ones, as a template does
         type: boolean
@@ -37,7 +42,25 @@ jobs:
     outputs:
       tip: ${{ steps.tip.outputs.tip }}
     steps:
+      # checkout takes a commit only as the full hash.
+      - name: Resolve the source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SOURCE" ]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE" --jq .sha) || {
+              echo "::error::$GITHUB_REPOSITORY has no branch, tag or commit named $SOURCE"
+              exit 1
+            }
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.source.outputs.sha }}
 
       # Callers use this workflow from main, so web.py comes from main too.
       - uses: actions/checkout@v7
@@ -48,8 +71,9 @@ jobs:
       - name: Build the players
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          EMULATOR: ${{ inputs.emulator }}
         run: >-
-          python3 .rp6502-web/web/web.py --ci --rp6502 "${{ inputs.rp6502 }}"
+          python3 .rp6502-web/web/web.py --ci --emulator "$EMULATOR"
           --out "$RUNNER_TEMP/site" ${{ inputs.update-tools && '--update-tools' || '' }}
 
       # Runs for separate commits overlap, so a run deploys only while the
@@ -64,6 +88,7 @@ jobs:
             echo "tip=true" >> "$GITHUB_OUTPUT"
           else
             echo "tip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Not deployed: $GITHUB_REF moved past $GITHUB_SHA during the run"
           fi
 
       - uses: actions/upload-pages-artifact@v5
