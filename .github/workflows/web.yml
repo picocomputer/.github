@@ -1,0 +1,99 @@
+# Publishes the web players that a repository's markdown asks for to its
+# GitHub Pages site. A repository calls it with:
+#
+#   jobs:
+#     web:
+#       uses: picocomputer/.github/.github/workflows/web.yml@main
+#       permissions:
+#         contents: read
+#         pages: write
+#         id-token: write
+#
+# web/web.py describes the markdown, and so does
+# https://picocomputer.github.io/web.html.
+
+name: Web players
+
+on:
+  workflow_call:
+    inputs:
+      rp6502:
+        description: rp6502 release for rp6502.js and rp6502.wasm, such as v0.35
+        type: string
+        default: latest
+      update-tools:
+        description: build with the latest tools and BASIC instead of the committed ones, as a template does
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      tip: ${{ steps.tip.outputs.tip }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # This workflow's own commit, so web.py always matches it. An empty
+      # SHA would check out the default branch instead of failing.
+      - name: Find this workflow's commit
+        env:
+          SHA: ${{ github.job_workflow_sha }}
+        run: |
+          if [ -z "$SHA" ]; then
+            echo "github.job_workflow_sha is empty" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          repository: picocomputer/.github
+          ref: ${{ github.job_workflow_sha }}
+          path: .rp6502-web
+
+      - name: Build the players
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .rp6502-web/web/web.py --ci --rp6502 "${{ inputs.rp6502 }}"
+          --out "$RUNNER_TEMP/site" ${{ inputs.update-tools && '--update-tools' || '' }}
+
+      # Runs for separate commits overlap, so a run deploys only while the
+      # branch is still at its commit, and an older run never replaces a
+      # newer site.
+      - name: Check that the branch is still at this commit
+        id: tip
+        run: |
+          set -euo pipefail
+          tip=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
+          if [ "$tip" = "$GITHUB_SHA" ]; then
+            echo "tip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.tip == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
