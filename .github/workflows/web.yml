@@ -39,21 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # This workflow's own commit, so web.py always matches it. An empty
-      # SHA would check out the default branch instead of failing.
-      - name: Find this workflow's commit
-        env:
-          SHA: ${{ github.job_workflow_sha }}
-        run: |
-          if [ -z "$SHA" ]; then
-            echo "github.job_workflow_sha is empty" >&2
-            exit 1
-          fi
-
+      # Callers use this workflow from main, so web.py comes from main too.
       - uses: actions/checkout@v7
         with:
           repository: picocomputer/.github
-          ref: ${{ github.job_workflow_sha }}
           path: .rp6502-web
 
       - name: Build the players
