@@ -15,7 +15,10 @@ Each player is an HTML comment in a markdown file that git tracks:
 
 The target is built with the CMake preset, and the player is written to
 <out>/<target>/index.html, with rp6502.js and rp6502.wasm from the itch.io
-zip of an rp6502 release in <out>. Run it from the root of the repository.
+zip of an rp6502 release in <out>. The Linux emulator of that release runs
+the ROM for 120 frames, or the number given by the frames key, and the
+screen is written to <out>/<target>/screenshot.png, 640 pixels wide, for a
+README to show. Run it from the root of the repository.
 The project's own tools/ are used as committed, including BASIC in
 tools/basic.rp6502, unless --update-tools asks for the latest of each.
 The keys are described at https://picocomputer.github.io/web.html.
@@ -26,17 +29,21 @@ import html
 import io
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 
 REQUIRED = ("preset", "target")
 SETTINGS = ("folder", "title", "args", "install", "image", "db", "bg",
-            "filter", "overlay")
+            "filter", "overlay", "frames")
 COMPILERS = ("cc65", "llvm-mos")
 INSTALL_URL = "https://raw.githubusercontent.com/picocomputer/.github/main/install"
 
@@ -90,8 +97,10 @@ def parse_block(body, where):
             raise WebError(f"{where}: '{key}' is missing")
     if not re.fullmatch(r"[A-Za-z0-9._-]+", block["target"]):
         raise WebError(f"{where}: target '{block['target']}' cannot be a folder name on the site")
-    if block.get("overlay", "no") not in ("yes", "no"):
+    if block.get("overlay", "yes") not in ("yes", "no"):
         raise WebError(f"{where}: overlay is yes or no")
+    if not re.fullmatch(r"[1-9][0-9]*", block.get("frames", "1")):
+        raise WebError(f"{where}: frames is a whole number above 0, such as 300")
     block.setdefault("folder", ".")
     return block
 
@@ -173,7 +182,9 @@ def github_json(url):
 
 
 def fetch_emulator(release):
-    """rp6502.js, rp6502.wasm and index.html from the itch.io zip."""
+    """rp6502.js, rp6502.wasm and index.html from the itch.io zip, and
+    rp6502-emu from the Linux build for this computer when the release has
+    one."""
     api = "https://api.github.com/repos/picocomputer/rp6502/releases/"
     info = github_json(api + ("latest" if release == "latest" else f"tags/{release}"))
     urls = [a["browser_download_url"] for a in info["assets"]
@@ -183,7 +194,18 @@ def fetch_emulator(release):
     print(f"Fetching the emulator from {info['tag_name']}", flush=True)
     with urllib.request.urlopen(urls[0], timeout=120) as response:
         archive = zipfile.ZipFile(io.BytesIO(response.read()))
-    return {name: archive.read(name) for name in ("rp6502.js", "rp6502.wasm", "index.html")}
+    files = {name: archive.read(name) for name in ("rp6502.js", "rp6502.wasm", "index.html")}
+    linux = f"-linux-{platform.machine()}.tar.gz"
+    urls = [a["browser_download_url"] for a in info["assets"]
+            if platform.system() == "Linux" and a["name"].endswith(linux)]
+    if len(urls) != 1:
+        print(f"warning: rp6502 release {info['tag_name']} has no emulator for this "
+              "computer, so the players have no screenshots", file=sys.stderr)
+        return files
+    with urllib.request.urlopen(urls[0], timeout=120) as response:
+        with tarfile.open(fileobj=io.BytesIO(response.read())) as tar:
+            files["rp6502-emu"] = tar.extractfile("rp6502-emu").read()
+    return files
 
 
 def repository():
@@ -207,7 +229,7 @@ def page(template, block, files, repo):
         "db": block.get("db", ""),
         "bg": block.get("bg", ""),
         "filter": block.get("filter", ""),
-        "overlay": "overlay" if block.get("overlay") == "yes" else "",
+        "overlay": "overlay" if block.get("overlay", "yes") == "yes" else "",
         "footer": "footer" if block["footer"] else "",
         "image": os.path.basename(block["image"]) if "image" in block else "",
     }
@@ -233,7 +255,69 @@ def page(template, block, files, repo):
     return text.replace('src="rp6502.js"', 'src="../rp6502.js"')
 
 
-def write_site(out, emulator, players, repo):
+def screenshot(emu, block, folder):
+    """Runs the player's ROM, install files and arguments for the frames of
+    the block, and writes the screen to screenshot.png in the player's
+    folder."""
+    with tempfile.TemporaryDirectory() as tmp:
+        raw = os.path.join(tmp, "raw.png")
+        # A fixed seed and an empty save folder give the same screenshot on
+        # every run, and a local run neither reads nor writes the real saves.
+        command = [emu, "--screenshot", raw, "--seed", "1",
+                   "--save-dir", os.path.join(tmp, "saves")]
+        if "frames" in block:
+            command += ["--frames", block["frames"]]
+        for path in block.get("install", "").split():
+            command += ["--install", os.path.join(folder, os.path.basename(path))]
+        command.append(os.path.join(folder, block["target"] + ".rp6502"))
+        if block.get("args"):
+            command += ["--", *block["args"].split()]
+        if subprocess.run(command, stdout=subprocess.DEVNULL).returncode:
+            raise WebError(f"{block['where']}: the emulator wrote no screenshot")
+        write_wide_png(raw, os.path.join(folder, "screenshot.png"))
+
+
+def write_wide_png(raw, png):
+    """The emulator's PNG, which is uncompressed RGBA, as a compressed RGB
+    PNG 640 pixels wide. A canvas is 320 or 640 pixels wide, and a 320 one
+    is doubled both ways."""
+    with open(raw, "rb") as f:
+        data = f.read()
+    pos, idat = 8, []
+    while pos < len(data):
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        kind, body = data[pos + 4:pos + 8], data[pos + 8:pos + 8 + length]
+        if kind == b"IHDR":
+            width, height = int.from_bytes(body[0:4], "big"), int.from_bytes(body[4:8], "big")
+            form = body[8:]
+        elif kind == b"IDAT":
+            idat.append(body)
+        pos += 12 + length
+    pixels = zlib.decompress(b"".join(idat))
+    stride = width * 4 + 1
+    if form != bytes([8, 6, 0, 0, 0]) or width not in (320, 640) or \
+            any(pixels[y * stride] for y in range(height)):
+        raise WebError(f"{raw} is not an emulator screenshot")
+    scale = 640 // width
+    rows = []
+    for y in range(height):
+        rgba = pixels[y * stride + 1:(y + 1) * stride]
+        rgb = bytearray(1 + 640 * 3)
+        for c in range(3):
+            for s in range(scale):
+                rgb[1 + c + 3 * s::3 * scale] = rgba[c::4]
+        rows += [rgb] * scale
+
+    def chunk(kind, body):
+        return (len(body).to_bytes(4, "big") + kind + body
+                + zlib.crc32(kind + body).to_bytes(4, "big"))
+    header = (640).to_bytes(4, "big") + (height * scale).to_bytes(4, "big") + bytes([8, 2, 0, 0, 0])
+    with open(png, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
+
+
+def write_site(out, emulator, players, repo, emu):
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
     for name in ("rp6502.js", "rp6502.wasm"):
@@ -249,6 +333,8 @@ def write_site(out, emulator, players, repo):
         names = [os.path.basename(p) for p in files]
         with open(os.path.join(folder, "index.html"), "w", encoding="utf-8") as f:
             f.write(page(template, block, names, repo))
+        if emu:
+            screenshot(emu, block, folder)
         title = block.get("title") or block["target"]
         items.append(f'  <li><a href="{block["target"]}/">{html.escape(title)}</a></li>')
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
@@ -302,7 +388,15 @@ def main():
             print(f"warning: {block['where']}: no link to the {block['target']} player",
                   file=sys.stderr)
 
-    write_site(args.out, fetch_emulator(args.rp6502), players, repository())
+    emulator = fetch_emulator(args.rp6502)
+    with tempfile.TemporaryDirectory() as tmp:
+        emu = None
+        if "rp6502-emu" in emulator:
+            emu = os.path.join(tmp, "rp6502-emu")
+            with open(emu, "wb") as f:
+                f.write(emulator["rp6502-emu"])
+            os.chmod(emu, 0o755)
+        write_site(args.out, emulator, players, repository(), emu)
     for block, _ in players:
         print(f"{block['target']}/ from {block['preset']}")
     print(f"Site in {args.out}")
