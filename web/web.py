@@ -121,13 +121,6 @@ def use_compiler(preset, ci):
             os.environ["PATH"] = os.environ["PATH"] + os.pathsep + bin_dir
 
 
-def update_tools(folder):
-    """The latest tools and emulator."""
-    tools = os.path.join(folder, "tools")
-    print(f"Updating {tools}", flush=True)
-    subprocess.run(["cmake", "-P", os.path.join(tools, "rp6502.cmake")], check=True)
-
-
 def build(folder, preset, build_dir, emulator):
     """Configures the preset of folder into build_dir, never the build folder
     of the project, and builds it."""
@@ -312,8 +305,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--ci", action="store_true",
                         help="install the compilers the presets need")
-    parser.add_argument("--update-tools", action="store_true",
-                        help="build with the latest tools, as a template's CI does")
     parser.add_argument("--emulator", default="",
                         help="the web zip for every rp6502_web(), as its EMULATOR takes it")
     parser.add_argument("--out", default="build/web", help="site folder (default: build/web)")
@@ -326,10 +317,6 @@ def main():
         same = [o["where"] for o in blocks if o["name"] == b["name"]]
         if len(same) > 1:
             raise WebError(f"{' and '.join(same)} both publish {b['publish']}")
-
-    if args.update_tools:
-        for folder in dict.fromkeys(b["folder"] for b in blocks):
-            update_tools(folder)
 
     shutil.rmtree(args.out, ignore_errors=True)
     os.makedirs(args.out)

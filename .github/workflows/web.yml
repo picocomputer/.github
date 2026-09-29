@@ -26,10 +26,6 @@ on:
         description: web zip for every rp6502_web(), as EMULATOR takes it, such as v0.35; empty is the one in CMakeLists.txt
         type: string
         default: ''
-      update-tools:
-        description: build with the latest tools and BASIC instead of the committed ones, as a template does
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -74,7 +70,7 @@ jobs:
           EMULATOR: ${{ inputs.emulator }}
         run: >-
           python3 .rp6502-web/web/web.py --ci --emulator "$EMULATOR"
-          --out "$RUNNER_TEMP/site" ${{ inputs.update-tools && '--update-tools' || '' }}
+          --out "$RUNNER_TEMP/site"
 
       # Runs for separate commits overlap, so a run deploys only while the
       # branch is still at its commit, and an older run never replaces a
