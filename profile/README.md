@@ -21,7 +21,7 @@ are currently routed according to the logic below. If the date isn't
 updating every day, something went wrong with the automation.
 
 <!-- compilers:start -->
-Last checked on 2026-10-03 UTC.
+Last checked on 2026-10-04 UTC.
 
 - **cc65**: [picocomputer/cc65](https://github.com/picocomputer/cc65), branch `master`. The fork contains 4 commits not in the upstream repository. The Windows build is [cc65-snapshot-win64.zip](https://github.com/picocomputer/cc65/releases/download/prerelease/cc65-snapshot-win64.zip). On Linux and macOS, the install script builds cc65 from this repository.
 
