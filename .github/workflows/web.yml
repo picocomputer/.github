@@ -23,7 +23,7 @@ on:
         type: string
         default: ''
       emulator:
-        description: web zip for every rp6502_web(), as EMULATOR takes it, such as v0.35; empty is the one in CMakeLists.txt
+        description: web zip for every rp6502_web(), as EMULATOR takes it; empty is the one in CMakeLists.txt
         type: string
         default: ''
 

@@ -148,28 +148,38 @@ def unpack(zip_path, folder):
 
 def page_config(page):
     """rom, args, install and title as the inline scripts of the page set
-    them, the last one for a key winning. A value is read as a quoted
-    string or an array of quoted strings, the forms rp6502_web() and the
-    release page write."""
+    them, the last one for a key winning. The script that rp6502_web()
+    inserts is read last, because the values of that script replace those
+    of the rp6502() call after it. A value is read as a quoted string or an
+    array of quoted strings, the forms rp6502_web() and the release page
+    write; install may be either."""
     with open(page, encoding="utf-8") as f:
         text = f.read()
-    scripts = "\n".join(re.findall(r"<script>(.*?)</script>", text, re.S))
+    scripts = re.findall(r"<script>(.*?)</script>", text, re.S)
+    scripts.sort(key=lambda s: s.lstrip().startswith("// rp6502_web()"))
+    scripts = "\n".join(scripts)
     string = r"'([^'\\]*)'|\"([^\"\\]*)\""
     config = {}
     for m in re.finditer(r"\b(rom|args|install|title)\s*[:=]\s*", scripts):
         key, rest = m.group(1), scripts[m.end():]
         one = re.match(string, rest)
         many = re.match(r"\[\s*((?:(?:" + string + r")\s*,?\s*)*)\]", rest)
-        if key in ("rom", "title") and one:
-            config[key] = one.group(1) if one.group(1) is not None else one.group(2)
+        if key in ("rom", "title", "install") and one:
+            value = one.group(1) if one.group(1) is not None else one.group(2)
+            config[key] = ([value] if value else []) if key == "install" else value
         elif key in ("args", "install") and many:
             config[key] = [a if a else b for a, b in re.findall(string, many.group(1))]
         else:
             raise WebError(f"{page}: '{key}' is set to '{rest.splitlines()[0].strip()}', "
-                           "which web.py does not read; write a quoted string, or an "
-                           "array of them for args and install")
+                           "which web.py does not read; write a quoted string, an "
+                           "array of them for args, or either for install")
+    # A page passes rom as an argument of rp6502(), and the script of
+    # rp6502_web() replaces that argument, so the ROM comes from that script.
+    wrapper = re.search(r"// rp6502_web\(\).*?\bconst rom = '([^']*)'", scripts, re.S)
+    if wrapper:
+        config["rom"] = wrapper.group(1)
     if not config.get("rom"):
-        raise WebError(f"{page} sets no CONFIG.rom")
+        raise WebError(f"{page} sets no rom")
     return config
 
 
