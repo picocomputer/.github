@@ -350,7 +350,12 @@ def main():
             site = os.path.join(args.out, block["name"])
             unpack(zip_path, site)
             config = page_config(os.path.join(site, "index.html"))
-            with open(os.path.join(web, block["name"] + ".emulator")) as f:
+            emulator = os.path.join(built[(folder, preset)], "CMakeFiles",
+                                    block["name"] + ".emulator")
+            # Older tools write the file to web/. Remove this at the end of 2026.
+            if not os.path.isfile(emulator):
+                emulator = os.path.join(web, block["name"] + ".emulator")
+            with open(emulator) as f:
                 source = f.read().strip()
             if source not in emulators:
                 emulators[source] = fetch_linux_emulator(source, block["where"], tmp)
