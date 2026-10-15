@@ -127,7 +127,7 @@ def build(folder, preset, build_dir, emulator):
     print(f"Building {preset} in {folder}", flush=True)
     configure = ["cmake", "--preset", preset, "-B", build_dir]
     if emulator:
-        configure.append(f"-DRP6502_WEB_EMULATOR={emulator}")
+        configure.append(f"-DRP6502_WEB_VERSION={emulator}")
     if subprocess.run(configure, cwd=folder).returncode:
         raise WebError(f"cmake --preset {preset} failed in {folder}")
     if subprocess.run(["cmake", "--build", build_dir]).returncode:
@@ -183,31 +183,12 @@ def page_config(page):
     return config
 
 
-def github(url, token=True):
+def github(url):
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
     key = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token and key:
+    if key:
         request.add_header("Authorization", f"Bearer {key}")
     return request
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args):
-        return None
-
-
-def download(url, token):
-    """The file at url. An artifact answers with a redirect to the storage
-    host, which is followed without the token."""
-    try:
-        opener = urllib.request.build_opener(NoRedirect)
-        with opener.open(github(url, token), timeout=120) as response:
-            return response.read()
-    except urllib.error.HTTPError as e:
-        if e.code not in (301, 302, 303, 307, 308):
-            raise
-        with urllib.request.urlopen(e.headers["Location"], timeout=120) as response:
-            return response.read()
 
 
 def fetch_linux_emulator(source, where, tmp):
@@ -217,31 +198,25 @@ def fetch_linux_emulator(source, where, tmp):
         print(f"warning: {where}: the emulator is {source[5:]}, so the screenshot "
               "uses the Linux emulator of the latest release", file=sys.stderr)
         source = LATEST
-    kind, repo, ref = source.split()
+    _, repo, ref = source.split()
     suffix = f"-linux-{platform.machine()}.tar.gz"
     if platform.system() != "Linux":
         print("warning: the players have no screenshots, because this computer "
               "runs no Linux emulator", file=sys.stderr)
         return None
     api = f"https://api.github.com/repos/{repo}"
-    if kind == "release":
-        info = json.load(urllib.request.urlopen(
-            github(f"{api}/releases/" + ("latest" if ref == "latest" else f"tags/{ref}")),
-            timeout=60))
-        urls = [a["browser_download_url"] for a in info["assets"] if a["name"].endswith(suffix)]
-        token = False
-    else:
-        info = json.load(urllib.request.urlopen(
-            github(f"{api}/actions/runs/{ref}/artifacts?per_page=100"), timeout=60))
-        urls = [f"{api}/actions/artifacts/{a['id']}/zip" for a in info["artifacts"]
-                if a["name"].endswith(suffix) and not a["expired"]]
-        token = True
+    info = json.load(urllib.request.urlopen(
+        github(f"{api}/releases/" + ("latest" if ref == "latest" else f"tags/{ref}")),
+        timeout=60))
+    urls = [a["browser_download_url"] for a in info["assets"] if a["name"].endswith(suffix)]
     if len(urls) != 1:
         print(f"warning: {where}: {source} has no {suffix}, so there is no screenshot",
               file=sys.stderr)
         return None
     print(f"Fetching the Linux emulator of {source}", flush=True)
-    with tarfile.open(fileobj=io.BytesIO(download(urls[0], token))) as tar:
+    with urllib.request.urlopen(urls[0], timeout=120) as response:
+        archive = response.read()
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         data = tar.extractfile("rp6502-emu").read()
     emu = os.path.join(tmp, re.sub(r"[^A-Za-z0-9]", "_", source))
     with open(emu, "wb") as f:
@@ -316,7 +291,7 @@ def main():
     parser.add_argument("--ci", action="store_true",
                         help="install the compilers the presets need")
     parser.add_argument("--emulator", default="",
-                        help="the web zip for every rp6502_web(), as its EMULATOR takes it")
+                        help="the web player version for every rp6502_web(), such as 0.40")
     parser.add_argument("--out", default="build/web", help="site folder (default: build/web)")
     args = parser.parse_args()
 

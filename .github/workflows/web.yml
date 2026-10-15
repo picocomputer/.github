@@ -19,11 +19,11 @@ on:
   workflow_call:
     inputs:
       source:
-        description: branch, tag or commit of the calling repository to build; empty is the pushed commit
+        description: Branch, tag or commit to build
         type: string
         default: ''
       emulator:
-        description: web zip for every rp6502_web(), as EMULATOR takes it; empty is the one in CMakeLists.txt
+        description: Web player version, such as 0.40
         type: string
         default: ''
 
