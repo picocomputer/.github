@@ -192,8 +192,9 @@ def github(url):
 
 
 def fetch_linux_emulator(source, where, tmp):
-    """rp6502-emu from the Linux build that goes with the web zip of a
-    player, as rp6502_web() recorded it, or None."""
+    """The command that runs rp6502-emu from the Linux build that goes with
+    the web zip of a player, as rp6502_web() recorded it, or None. The
+    command fixes the seeds of memory and of the random numbers."""
     if source.startswith("file "):
         print(f"warning: {where}: the emulator is {source[5:]}, so the screenshot "
               "uses the Linux emulator of the latest release", file=sys.stderr)
@@ -222,7 +223,15 @@ def fetch_linux_emulator(source, where, tmp):
     with open(emu, "wb") as f:
         f.write(data)
     os.chmod(emu, 0o755)
-    return emu
+    # Version 0.41 replaced --seed with --memseed for memory and the seed
+    # command of a script for the random numbers.
+    usage = subprocess.run([emu, "--help"], capture_output=True, text=True).stdout
+    if "--memseed" not in usage:
+        return [emu, "--seed", "1"]
+    script = os.path.join(tmp, "seed.txt")
+    with open(script, "w") as f:
+        f.write("seed 1\n")
+    return [emu, "--memseed", "1", "--script", script]
 
 
 def screenshot(emu, block, folder, config):
@@ -230,10 +239,10 @@ def screenshot(emu, block, folder, config):
     of the block, and writes the screen to screenshot.png."""
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, "raw.png")
-        # A fixed seed and an empty save folder give the same screenshot on
-        # every run, and a local run neither reads nor writes the real saves.
-        command = [emu, "--screenshot", raw, "--seed", "1",
-                   "--save-dir", os.path.join(tmp, "saves")]
+        # The fixed seeds of emu and an empty save folder give the same
+        # screenshot on every run, and a local run neither reads nor writes
+        # the real saves.
+        command = [*emu, "--screenshot", raw, "--save-dir", os.path.join(tmp, "saves")]
         if "frames" in block:
             command += ["--frames", block["frames"]]
         for path in config.get("install", []):
