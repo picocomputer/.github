@@ -147,12 +147,12 @@ def unpack(zip_path, folder):
 
 
 def page_config(page):
-    """rom, args, install and title as the inline scripts of the page set
-    them, the last one for a key winning. The script that rp6502_web()
-    inserts is read last, because the values of that script replace those
-    of the rp6502() call after it. A value is read as a quoted string or an
-    array of quoted strings, the forms rp6502_web() and the release page
-    write; install may be either."""
+    """rom, args, install, title and aspect as the inline scripts of the
+    page set them, the last one for a key winning. The script that
+    rp6502_web() inserts is read last, because the values of that script
+    replace those of the rp6502() call after it. A value is read as a quoted
+    string or an array of quoted strings, the forms rp6502_web() and the
+    release page write; install may be either."""
     with open(page, encoding="utf-8") as f:
         text = f.read()
     scripts = re.findall(r"<script>(.*?)</script>", text, re.S)
@@ -160,11 +160,11 @@ def page_config(page):
     scripts = "\n".join(scripts)
     string = r"'([^'\\]*)'|\"([^\"\\]*)\""
     config = {}
-    for m in re.finditer(r"\b(rom|args|install|title)\s*[:=]\s*", scripts):
+    for m in re.finditer(r"\b(rom|args|install|title|aspect)\s*[:=]\s*", scripts):
         key, rest = m.group(1), scripts[m.end():]
         one = re.match(string, rest)
         many = re.match(r"\[\s*((?:(?:" + string + r")\s*,?\s*)*)\]", rest)
-        if key in ("rom", "title", "install") and one:
+        if key in ("rom", "title", "aspect", "install") and one:
             value = one.group(1) if one.group(1) is not None else one.group(2)
             config[key] = ([value] if value else []) if key == "install" else value
         elif key in ("args", "install") and many:
@@ -193,8 +193,9 @@ def github(url):
 
 def fetch_linux_emulator(source, where, tmp):
     """The command that runs rp6502-emu from the Linux build that goes with
-    the web zip of a player, as rp6502_web() recorded it, or None. The
-    command fixes the seeds of memory and of the random numbers."""
+    the web zip of a player, as rp6502_web() recorded it, and whether that
+    emulator takes --aspect, or None. The command fixes the seeds of memory
+    and of the random numbers."""
     if source.startswith("file "):
         print(f"warning: {where}: the emulator is {source[5:]}, so the screenshot "
               "uses the Linux emulator of the latest release", file=sys.stderr)
@@ -223,20 +224,25 @@ def fetch_linux_emulator(source, where, tmp):
     with open(emu, "wb") as f:
         f.write(data)
     os.chmod(emu, 0o755)
+    usage = subprocess.run([emu, "--help"], capture_output=True, text=True).stdout
+    # Emulators from before --aspect have only the 640x480 console, and
+    # their web players ignore the aspect setting.
+    aspect = "--aspect" in usage
     # Version 0.41 replaced --seed with --memseed for memory and the seed
     # command of a script for the random numbers.
-    usage = subprocess.run([emu, "--help"], capture_output=True, text=True).stdout
     if "--memseed" not in usage:
-        return [emu, "--seed", "1"]
+        return [emu, "--seed", "1"], aspect
     script = os.path.join(tmp, "seed.txt")
     with open(script, "w") as f:
         f.write("seed 1\n")
-    return [emu, "--memseed", "1", "--script", script]
+    return [emu, "--memseed", "1", "--script", script], aspect
 
 
-def screenshot(emu, block, folder, config):
-    """Runs the ROM, install files and arguments of the page for the frames
-    of the block, and writes the screen to screenshot.png."""
+def screenshot(emulator, block, folder, config):
+    """Runs the ROM, install files, arguments and aspect of the page for the
+    frames of the block, and writes the screen to screenshot.png. emulator
+    is what fetch_linux_emulator() returns."""
+    emu, aspect = emulator
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, "raw.png")
         # The fixed seeds of emu and an empty save folder give the same
@@ -245,6 +251,10 @@ def screenshot(emu, block, folder, config):
         command = [*emu, "--screenshot", raw, "--save-dir", os.path.join(tmp, "saves")]
         if "frames" in block:
             command += ["--frames", block["frames"]]
+        # aspect sizes the console canvas, so a program on the console is
+        # shot at the size that the player shows it.
+        if aspect and config.get("aspect"):
+            command += ["--aspect", config["aspect"]]
         for path in config.get("install", []):
             command += ["--install", os.path.join(folder, path)]
         command.append(os.path.join(folder, config["rom"]))
