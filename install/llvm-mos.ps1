@@ -49,8 +49,10 @@
         [Environment]::SetEnvironmentVariable('Path', "$path;$bin".TrimStart(';'), 'User')
         Write-Host "llvm-mos install: $bin was added to the end of the user Path."
     }
-    if (($env:Path -split ';') -notcontains $bin) { $env:Path = "$env:Path;$bin" }
+    # A session Path that already has the bin folder needs no new terminal.
+    $fresh = ($env:Path -split ';') -notcontains $bin
+    if ($fresh) { $env:Path = "$env:Path;$bin" }
 
     & (Join-Path $bin 'mos-rp6502-clang.bat') --version
-    Write-Host 'llvm-mos install: Open a new terminal and restart VS Code so the new Path takes effect.'
+    if ($fresh) { Write-Host 'llvm-mos install: Open a new terminal and restart VS Code so the new Path takes effect.' }
 }

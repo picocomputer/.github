@@ -47,7 +47,9 @@
         [Environment]::SetEnvironmentVariable('Path', "$bin;$path".TrimEnd(';'), 'User')
         Write-Host "cc65 install: $bin was added to the front of the user Path."
     }
-    if (($env:Path -split ';') -notcontains $bin) { $env:Path = "$bin;$env:Path" }
+    # A session Path that already has the bin folder needs no new terminal.
+    $fresh = ($env:Path -split ';') -notcontains $bin
+    if ($fresh) { $env:Path = "$bin;$env:Path" }
 
     # cl65 prints the version line on stderr. In hosts that capture stderr, such
     # as the ISE, Windows PowerShell 5.1 converts each stderr line into an
@@ -55,5 +57,5 @@
     # host prints the same plain line.
     $ErrorActionPreference = 'Continue'
     Write-Host (& (Join-Path $bin 'cl65.exe') --version 2>&1)
-    Write-Host 'cc65 install: Open a new terminal and restart VS Code so the new Path takes effect.'
+    if ($fresh) { Write-Host 'cc65 install: Open a new terminal and restart VS Code so the new Path takes effect.' }
 }

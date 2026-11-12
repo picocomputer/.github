@@ -64,6 +64,10 @@ jobs:
           repository: picocomputer/.github
           path: .rp6502-web
 
+      # The Linux emulator of 0.43 and later plays sound through PulseAudio.
+      - name: Install PulseAudio
+        run: sudo apt-get update && sudo apt-get install -y libpulse0
+
       - name: Build the players
         env:
           GITHUB_TOKEN: ${{ github.token }}

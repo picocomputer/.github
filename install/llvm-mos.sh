@@ -61,5 +61,9 @@ if ! grep -qsF .rp6502/llvm-mos/bin "$profile"; then
 fi
 
 "$root/llvm-mos/bin/mos-rp6502-clang" --version
-info "$note"
+# A PATH that already has the bin folder needs no new login.
+case ":$PATH:" in
+*":$root/llvm-mos/bin:"*) ;;
+*) info "$note" ;;
+esac
 }

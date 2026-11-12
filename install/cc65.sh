@@ -68,5 +68,9 @@ if ! grep -qsF .rp6502/cc65/bin "$profile"; then
 fi
 
 "$root/cc65/bin/cl65" --version
-info "$note"
+# A PATH that already has the bin folder needs no new login.
+case ":$PATH:" in
+*":$root/cc65/bin:"*) ;;
+*) info "$note" ;;
+esac
 }
